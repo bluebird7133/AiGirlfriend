@@ -1,8 +1,9 @@
 # SkyBlock Girlfriend
 
-A client-side visual companion for Minecraft 26.2. The miniature copy of your
-player uses your current skin, follows behind you, and looks toward you. It does
-not add a companion to the world, send packets, or change server gameplay. Its
+SkyBlock Girlfriend is a client-side companion mod for Minecraft, intended for
+Hypixel SkyBlock players but usable anywhere. The miniature copy of your player
+uses your current skin, follows behind you, and looks toward you. It does not
+add a companion to the world, send packets, or change server gameplay. Its
 movement helper is local to the client and is never added to the world.
 
 ## Development
