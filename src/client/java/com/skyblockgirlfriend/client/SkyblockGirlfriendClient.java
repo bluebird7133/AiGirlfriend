@@ -19,9 +19,11 @@ public class SkyblockGirlfriendClient implements ClientModInitializer {
 		CompanionSettings settings = new CompanionSettings();
 		MiniatureCompanion companion = new MiniatureCompanion(settings);
 		CompanionMessaging messaging = new CompanionMessaging();
+		LlmSettings llmSettings = new LlmSettings();
+		LlmClient llmClient = new LlmClient();
 		NotificationRenderer notificationRenderer = new NotificationRenderer(settings);
 		MessageNotifications notifications = new MessageNotifications(messaging, notificationRenderer);
-		ConversationPanel conversationPanel = new ConversationPanel(settings, messaging);
+		ConversationPanel conversationPanel = new ConversationPanel(settings, messaging, llmSettings, llmClient);
 		HypixelDeathDetector deathDetector = new HypixelDeathDetector(messaging);
 		KeyMapping.Category category = KeyMapping.Category.register(
 				Identifier.fromNamespaceAndPath("skyblock-girlfriend", "companion")
@@ -40,10 +42,13 @@ public class SkyblockGirlfriendClient implements ClientModInitializer {
 			while (menuKey.consumeClick()) {
 				if (client.gui.screen() instanceof CompanionScreen
 						|| client.gui.screen() instanceof SkinPickerScreen
-						|| client.gui.screen() instanceof NotificationPositionScreen) {
+						|| client.gui.screen() instanceof NotificationPositionScreen
+						|| client.gui.screen() instanceof CompanionAppearanceScreen
+						|| client.gui.screen() instanceof LlmSettingsScreen) {
 					client.gui.setScreen(null);
 				} else if (client.gui.screen() == null && client.player != null) {
-					client.gui.setScreen(new CompanionScreen(settings, notificationRenderer));
+					client.gui.setScreen(new CompanionScreen(settings, notificationRenderer,
+							conversationPanel, llmSettings));
 				}
 			}
 		});

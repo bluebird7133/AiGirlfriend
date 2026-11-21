@@ -30,10 +30,17 @@ a world; the companion appears automatically. To verify it, move and turn in
 the world: the miniature should walk to a position behind you, remain close,
 and keep its head and body turned toward you.
 
-Press **G** in a world to open companion settings. The key can also be changed
-in Minecraft's Controls settings. The Appearance section lets you open a
-searchable, scrollable card list with a live preview. Type part of a filename in
-the **Search skins...** field to filter the cards; each card shows its preview
+Press **G** in a world to open companion settings. The name field controls the
+live nametag above the companion. The key can also be changed in Minecraft's
+Controls settings. **Super Secret Settings** opens companion-only appearance
+controls; Female Gender Mod is not required, and these options do not change
+your player. Adjust the textured shape's size, spacing, height, depth, and
+angle, then enable or tune its bounce and floppiness. Its texture is projected
+from the corresponding pixels of the selected skin's torso and outer layer, so
+clothing details follow changes to the shape's position and angle. These
+settings are saved with the companion's other options. The Appearance section lets you open a
+searchable, scrollable card list with a live preview. Type part of a filename
+in the **Search skins...** field to filter the cards; each card shows its preview
 and name below it, with `.png` omitted and long names scrolling horizontally.
 Click one to select it; the selected skin has a green outline. Put 64x64 PNG
 skins directly in the Minecraft instance's `skins`
@@ -57,28 +64,44 @@ The mod is licensed under CC0.
 
 Client-side companion messages appear in a queued notification with the selected
 skin's head, stay fully visible for five seconds, and then fade out. Press **G**
-and choose **GUI** to drag the preview or resize it by a corner. **Reset Position**
-restores its default position. Notification size and normalized position are
-saved in `config\skyblock-girlfriend\settings.properties`.
+and choose **GUI** to edit the Chat and Notification previews. Toggle either
+preview to hide it while editing the other; this does not disable that feature.
+Drag a visible preview to move it or use its corners to resize it. Selected
+previews have a white outline. **Reset Position** resets the currently visible
+previews. Positions and sizes are saved in
+`config\skyblock-girlfriend\settings.properties`.
 
-The normal player inventory has a conversation panel at the far-left edge. Drag
-its four-arrow handle to reposition it, or drag a corner to resize it. It stays
-left of the inventory slots and remembers its position and size. Set the
-companion's display name in the settings menu; that name appears above its
-messages. Resizing changes the available text area, not the font or portrait
-size. The panel supports mouse-wheel scrolling and a draggable scrollbar, and
-stays at the latest message unless you have scrolled up to older ones.
-Conversation history remains in memory across world changes and reconnections,
-but is cleared when Minecraft restarts and is never written to disk. The message
-panel includes a message field with a Send button; click the field, type, and
-press Enter or click Send. Player messages appear on the right with your skin
-face, while companion replies appear on the left. The companion can calculate
-expressions using `+`, `-`, `/`, `*` or `x`, parentheses, and `k`/`m` number
-suffixes (`3k + 58k` becomes `61,000`). Commas in input are ignored. This
-feature works locally and does not use an LLM or API key. Notifications are
-suppressed while the message field is focused; messages still appear in the
-conversation history. Invalid calculations receive a randomly selected playful
-reply.
+The normal player inventory has a conversation panel at the far-left edge,
+beside the inventory slots. Its position and size are edited from the GUI
+screen, not by dragging the live panel. The header shows the selected companion
+face and name. Click the calculator icon to switch between the main AI chat and
+the separate Math chat; the selected chat stays active when closing and
+reopening the inventory, and a new game launch starts in the AI chat. The panel
+supports mouse-wheel scrolling and a draggable scrollbar, and follows new
+messages unless you have scrolled up to older ones.
+
+The main chat supports Groq, OpenAI, and local Ollama. Press **G** and choose
+**LLM Setup** to select a service, endpoint, model, and API key, then enable AI.
+The default Groq model is `openai/gpt-oss-120b`; OpenAI defaults to
+`gpt-4.1-mini`, and Ollama defaults to `llama3.2:3b` at `localhost:11434`.
+Ollama must be running locally and have the selected model installed. API keys
+are saved in plain text in the instance's local
+`config\skyblock-girlfriend\llm.properties` file. The mod does not bundle or log
+keys; for hosted providers, it sends the key and AI chat messages to the
+selected service with each request. Ollama requests stay on localhost.
+Groq GPT-OSS uses low reasoning effort and returns only the visible answer to
+the chat; provider HTTP errors and empty replies include available status and
+token-usage details.
+
+The Math chat works locally without an LLM. It calculates expressions using
+`+`, `-`, `/`, `*` or `x`, parentheses, and `k`/`m` number suffixes
+(`3k + 58k` becomes `61,000`). Commas in input are ignored. Invalid calculations
+receive a randomly selected playful reply. Chat histories remain in memory
+across world changes and reconnections, but are cleared when Minecraft restarts
+and are never written to disk. Notifications are suppressed while the message
+field is focused; messages still appear in conversation history. Player
+messages appear on the right with your skin face, while companion replies appear
+on the left.
 
 Death messages are detected only on `hypixel.net` or a subdomain while the
 sidebar identifies SkyBlock. The detector recognizes the local-player

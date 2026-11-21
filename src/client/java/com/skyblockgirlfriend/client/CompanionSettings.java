@@ -33,6 +33,10 @@ public final class CompanionSettings {
 	private static final Logger LOGGER = LoggerFactory.getLogger("skyblock-girlfriend");
 	private static final float MIN_SCALE = 0.3F;
 	private static final float MAX_SCALE = 2.0F;
+	private static final float MIN_BUST_SIZE = 0.25F;
+	private static final float MAX_BUST_SIZE = 1.5F;
+	private static final float MIN_BUST_SPACING = 0.6F;
+	private static final float MAX_BUST_SPACING = 1.6F;
 	private static final int MAX_PREVIEW_SKIN_CACHE = 32;
 
 	private final Path settingsFile = FabricLoader.getInstance().getConfigDir()
@@ -42,6 +46,15 @@ public final class CompanionSettings {
 	private final List<SkinFile> skins = new ArrayList<>();
 	private float scale = 0.5F;
 	private boolean invisible;
+	private boolean appearanceEnabled = true;
+	private boolean appearancePhysicsEnabled = true;
+	private float bustSize = 0.8F;
+	private float bustSpacing = 1.0F;
+	private float bustHeight;
+	private float bustDepth;
+	private float bustAngle;
+	private float bustBounce = 0.45F;
+	private float bustFloppiness = 0.3F;
 	private float notificationPositionX = 0.02F;
 	private float notificationPositionY = 0.08F;
 	private int notificationWidth = 280;
@@ -71,6 +84,78 @@ public final class CompanionSettings {
 
 	public void setScale(float scale) {
 		this.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+	}
+
+	public boolean isAppearanceEnabled() {
+		return appearanceEnabled;
+	}
+
+	public void toggleAppearance() {
+		appearanceEnabled = !appearanceEnabled;
+	}
+
+	public boolean isAppearancePhysicsEnabled() {
+		return appearancePhysicsEnabled;
+	}
+
+	public void toggleAppearancePhysics() {
+		appearancePhysicsEnabled = !appearancePhysicsEnabled;
+	}
+
+	public float bustSize() {
+		return bustSize;
+	}
+
+	public void setBustSize(float size) {
+		bustSize = clamp(size, MIN_BUST_SIZE, MAX_BUST_SIZE);
+	}
+
+	public float bustSpacing() {
+		return bustSpacing;
+	}
+
+	public void setBustSpacing(float spacing) {
+		bustSpacing = clamp(spacing, MIN_BUST_SPACING, MAX_BUST_SPACING);
+	}
+
+	public float bustHeight() {
+		return bustHeight;
+	}
+
+	public void setBustHeight(float height) {
+		bustHeight = clamp(height, -0.18F, 0.18F);
+	}
+
+	public float bustDepth() {
+		return bustDepth;
+	}
+
+	public void setBustDepth(float depth) {
+		bustDepth = clamp(depth, -0.08F, 0.15F);
+	}
+
+	public float bustAngle() {
+		return bustAngle;
+	}
+
+	public void setBustAngle(float angle) {
+		bustAngle = clamp(angle, 0.0F, 25.0F);
+	}
+
+	public float bustBounce() {
+		return bustBounce;
+	}
+
+	public void setBustBounce(float bounce) {
+		bustBounce = clamp(bounce, 0.0F, 1.0F);
+	}
+
+	public float bustFloppiness() {
+		return bustFloppiness;
+	}
+
+	public void setBustFloppiness(float floppiness) {
+		bustFloppiness = clamp(floppiness, 0.0F, 1.0F);
 	}
 
 	public float notificationPositionX() {
@@ -226,6 +311,15 @@ public final class CompanionSettings {
 		Properties properties = new Properties();
 		properties.setProperty("scale", Float.toString(scale));
 		properties.setProperty("invisible", Boolean.toString(invisible));
+		properties.setProperty("appearance_enabled", Boolean.toString(appearanceEnabled));
+		properties.setProperty("appearance_physics_enabled", Boolean.toString(appearancePhysicsEnabled));
+		properties.setProperty("bust_size", Float.toString(bustSize));
+		properties.setProperty("bust_spacing", Float.toString(bustSpacing));
+		properties.setProperty("bust_height", Float.toString(bustHeight));
+		properties.setProperty("bust_depth", Float.toString(bustDepth));
+		properties.setProperty("bust_angle", Float.toString(bustAngle));
+		properties.setProperty("bust_bounce", Float.toString(bustBounce));
+		properties.setProperty("bust_floppiness", Float.toString(bustFloppiness));
 		properties.setProperty("notification_x", Float.toString(notificationPositionX));
 		properties.setProperty("notification_y", Float.toString(notificationPositionY));
 		properties.setProperty("notification_width", Integer.toString(notificationWidth));
@@ -400,6 +494,16 @@ public final class CompanionSettings {
 		}
 		notificationPositionX = readPosition(properties, "notification_x", notificationPositionX);
 		notificationPositionY = readPosition(properties, "notification_y", notificationPositionY);
+		appearanceEnabled = readBoolean(properties, "appearance_enabled", appearanceEnabled);
+		appearancePhysicsEnabled = readBoolean(
+				properties, "appearance_physics_enabled", appearancePhysicsEnabled);
+		setBustSize(readFloat(properties, "bust_size", bustSize, MIN_BUST_SIZE, MAX_BUST_SIZE));
+		setBustSpacing(readFloat(properties, "bust_spacing", bustSpacing, MIN_BUST_SPACING, MAX_BUST_SPACING));
+		setBustHeight(readFloat(properties, "bust_height", bustHeight, -0.18F, 0.18F));
+		setBustDepth(readFloat(properties, "bust_depth", bustDepth, -0.08F, 0.15F));
+		setBustAngle(readFloat(properties, "bust_angle", bustAngle, 0.0F, 25.0F));
+		setBustBounce(readFloat(properties, "bust_bounce", bustBounce, 0.0F, 1.0F));
+		setBustFloppiness(readFloat(properties, "bust_floppiness", bustFloppiness, 0.0F, 1.0F));
 		setNotificationSize(
 				readSize(properties, "notification_width", notificationWidth),
 				readSize(properties, "notification_height", notificationHeight)
@@ -444,8 +548,43 @@ public final class CompanionSettings {
 		return defaultValue;
 	}
 
+	private static boolean readBoolean(Properties properties, String key, boolean defaultValue) {
+		String savedValue = properties.getProperty(key);
+		if ("true".equalsIgnoreCase(savedValue) || "false".equalsIgnoreCase(savedValue)) {
+			return Boolean.parseBoolean(savedValue);
+		}
+		if (savedValue != null) {
+			LOGGER.warn("Ignoring invalid companion setting '{}' for {}", savedValue, key);
+		}
+		return defaultValue;
+	}
+
+	private static float readFloat(Properties properties, String key, float defaultValue, float minimum, float maximum) {
+		String savedValue = properties.getProperty(key);
+		if (savedValue == null) {
+			return defaultValue;
+		}
+		try {
+			float parsed = Float.parseFloat(savedValue);
+			if (Float.isFinite(parsed)) {
+				return Math.max(minimum, Math.min(maximum, parsed));
+			}
+			LOGGER.warn("Ignoring non-finite companion setting '{}' for {}", savedValue, key);
+		} catch (NumberFormatException exception) {
+			LOGGER.warn("Ignoring invalid companion setting '{}' for {}", savedValue, key);
+		}
+		return defaultValue;
+	}
+
 	private static float clampPosition(float position) {
 		return Math.max(0.0F, Math.min(1.0F, position));
+	}
+
+	private static float clamp(float value, float minimum, float maximum) {
+		if (!Float.isFinite(value)) {
+			return minimum;
+		}
+		return Math.max(minimum, Math.min(maximum, value));
 	}
 
 	public record SkinFile(String fileName, String name) {

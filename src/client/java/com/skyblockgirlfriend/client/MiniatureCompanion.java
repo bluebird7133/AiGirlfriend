@@ -7,6 +7,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
@@ -17,6 +18,7 @@ public final class MiniatureCompanion {
 	private static final double TELEPORT_DISTANCE = 20.0;
 	private static final double FOLLOW_SPEED = 1.5;
 	private static final int REPATH_INTERVAL = 10;
+	private static final float PLAYER_STANDING_HEIGHT = 1.8F;
 
 	private double x;
 	private double y;
@@ -106,7 +108,7 @@ public final class MiniatureCompanion {
 		double movedZ = z - previousZ;
 		double movedDistance = Math.sqrt(movedX * movedX + movedZ * movedZ);
 		if (movedDistance > 0.002) {
-			walkPhase += (float) (movedDistance * 4.0);
+			walkPhase += (float) (movedDistance * 3.6);
 		}
 		float targetWalkSpeed = (float) Math.min(1.0, movedDistance * 8.0);
 		walkSpeed += (targetWalkSpeed - walkSpeed) * 0.35F;
@@ -129,9 +131,17 @@ public final class MiniatureCompanion {
 		state.y = interpolate(previousY, y, partialTick);
 		state.z = interpolate(previousZ, z, partialTick);
 		state.scale *= settings.scale();
+		state.nameTag = Component.literal(settings.companionDisplayName());
+		state.scoreText = null;
+		state.nameTagAttachment = new Vec3(0.0,
+				(PLAYER_STANDING_HEIGHT + 0.08F) * settings.scale(), 0.0);
 		state.bodyRot = bodyYaw;
 		state.yRot = wrapDegrees(headYaw - bodyYaw);
 		state.xRot = headPitch;
+		state.deathTime = 0.0F;
+		state.hasRedOverlay = false;
+		state.ticksSinceKineticHitFeedback = 0.0F;
+		state.isFullyFrozen = false;
 		state.walkAnimationPos = (float) interpolate(previousWalkPhase, walkPhase, partialTick);
 		state.walkAnimationSpeed = (float) interpolate(previousWalkSpeed, walkSpeed, partialTick);
 		state.skin = settings.skinForRender(client, state.skin);
@@ -182,6 +192,14 @@ public final class MiniatureCompanion {
 				state.z - cameraState.pos.z,
 				context.poseStack(),
 				context.submitNodeCollector()
+		);
+		CompanionAppearanceRenderer.submit(
+				context,
+				state,
+				settings,
+				bodyYaw,
+				(float) interpolate(previousWalkPhase, walkPhase, partialTick),
+				(float) interpolate(previousWalkSpeed, walkSpeed, partialTick)
 		);
 	}
 

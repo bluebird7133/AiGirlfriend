@@ -2,34 +2,50 @@ package com.skyblockgirlfriend.client;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public final class CompanionMessaging {
 	private static final long VISIBLE_NANOS = 5_000_000_000L;
 	private static final long FADE_NANOS = 800_000_000L;
 
-	private final List<Message> history = new ArrayList<>();
+	private final Map<ChatType, List<Message>> histories = new EnumMap<>(ChatType.class);
 	private final ArrayDeque<Message> notificationQueue = new ArrayDeque<>();
 	private Message activeNotification;
 	private long activeNotificationStarted;
 	private boolean notificationsSuppressed;
 
+	public CompanionMessaging() {
+		for (ChatType chatType : ChatType.values()) {
+			histories.put(chatType, new ArrayList<>());
+		}
+	}
+
 	public void addMessage(Sender sender, String text) {
-		addMessage(sender, text, true);
+		addMessage(ChatType.AI, sender, text, true);
+	}
+
+	public void addMessage(ChatType chatType, Sender sender, String text) {
+		addMessage(chatType, sender, text, true);
 	}
 
 	public void addPlayerMessage(String text) {
-		addMessage(Sender.PLAYER, text, false);
+		addPlayerMessage(ChatType.AI, text);
 	}
 
-	private void addMessage(Sender sender, String text, boolean notify) {
+	public void addPlayerMessage(ChatType chatType, String text) {
+		addMessage(chatType, Sender.PLAYER, text, false);
+	}
+
+	private void addMessage(ChatType chatType, Sender sender, String text, boolean notify) {
 		if (text == null || text.isBlank()) {
 			return;
 		}
 
 		Message message = new Message(Objects.requireNonNull(sender), text);
-		history.add(message);
+		histories.get(Objects.requireNonNull(chatType)).add(message);
 		if (!notify || notificationsSuppressed) {
 			return;
 		}
@@ -41,15 +57,27 @@ public final class CompanionMessaging {
 	}
 
 	public List<Message> history() {
-		return List.copyOf(history);
+		return history(ChatType.AI);
+	}
+
+	public List<Message> history(ChatType chatType) {
+		return List.copyOf(histories.get(Objects.requireNonNull(chatType)));
 	}
 
 	public int messageCount() {
-		return history.size();
+		return messageCount(ChatType.AI);
+	}
+
+	public int messageCount(ChatType chatType) {
+		return histories.get(Objects.requireNonNull(chatType)).size();
 	}
 
 	public Message messageAt(int index) {
-		return history.get(index);
+		return messageAt(ChatType.AI, index);
+	}
+
+	public Message messageAt(ChatType chatType, int index) {
+		return histories.get(Objects.requireNonNull(chatType)).get(index);
 	}
 
 	public void setNotificationsSuppressed(boolean suppressed) {
@@ -93,6 +121,11 @@ public final class CompanionMessaging {
 	public enum Sender {
 		COMPANION,
 		PLAYER
+	}
+
+	public enum ChatType {
+		AI,
+		MATH
 	}
 
 	public record Message(Sender sender, String text) {

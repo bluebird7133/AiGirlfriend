@@ -29,9 +29,16 @@ public final class NotificationRenderer {
 	}
 
 	public void renderPreview(GuiGraphicsExtractor graphics, Minecraft client) {
+		renderPreview(graphics, client, false);
+	}
+
+	public void renderPreview(GuiGraphicsExtractor graphics, Minecraft client, boolean selected) {
 		String text = "HOW DID YOU DIE?!";
 		Layout layout = layout(graphics.guiWidth(), graphics.guiHeight(), client.font, text);
 		draw(graphics, client, text, layout, 1.0F);
+		if (selected) {
+			graphics.outline(layout.x(), layout.y(), layout.width(), layout.height(), 0xFFFFFFFF);
+		}
 		drawResizeHandles(graphics, layout);
 	}
 

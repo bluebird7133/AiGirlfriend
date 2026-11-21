@@ -17,14 +17,23 @@ public final class CompanionScreen extends Screen {
 
 	private final CompanionSettings settings;
 	private final NotificationRenderer notificationRenderer;
+	private final ConversationPanel conversationPanel;
+	private final LlmSettings llmSettings;
 	private Button invisibleButton;
 	private EditBox companionNameBox;
 	private int companionNameX;
 
-	public CompanionScreen(CompanionSettings settings, NotificationRenderer notificationRenderer) {
+	public CompanionScreen(
+			CompanionSettings settings,
+			NotificationRenderer notificationRenderer,
+			ConversationPanel conversationPanel,
+			LlmSettings llmSettings
+	) {
 		super(Component.literal("Companion Settings"));
 		this.settings = settings;
 		this.notificationRenderer = notificationRenderer;
+		this.conversationPanel = conversationPanel;
+		this.llmSettings = llmSettings;
 	}
 
 	@Override
@@ -34,8 +43,15 @@ public final class CompanionScreen extends Screen {
 		int buttonY = 58;
 		companionNameX = width / 2 + 34;
 		addRenderableWidget(Button.builder(Component.literal("GUI"), button ->
-				minecraft.gui.setScreen(new NotificationPositionScreen(settings, notificationRenderer, this)))
+				minecraft.gui.setScreen(new NotificationPositionScreen(
+						settings, notificationRenderer, conversationPanel, this)))
 				.bounds(width / 2 + 95, 30, 60, 20).build());
+		addRenderableWidget(Button.builder(Component.literal("LLM Setup"), button ->
+				minecraft.gui.setScreen(new LlmSettingsScreen(llmSettings, this)))
+				.bounds(width / 2 - 5, 30, 94, 20).build());
+		addRenderableWidget(Button.builder(Component.literal("Super Secret Settings"), button ->
+				minecraft.gui.setScreen(new CompanionAppearanceScreen(settings, this)))
+				.bounds(width / 2 - 150, 30, 140, 20).build());
 		addRenderableWidget(Button.builder(Component.literal("Select skin"), button ->
 				minecraft.gui.setScreen(new SkinPickerScreen(settings, this)))
 				.bounds(left, buttonY, 300, 20).build());

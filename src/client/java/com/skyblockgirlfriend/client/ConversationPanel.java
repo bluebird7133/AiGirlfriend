@@ -16,43 +16,54 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerSkin;
+import net.minecraft.client.resources.DefaultPlayerSkin;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public final class ConversationPanel {
+	private static final Logger LOGGER = LoggerFactory.getLogger("skyblock-girlfriend");
+	private static final int MAX_LLM_HISTORY_MESSAGES = 20;
 	private static final int MIN_WIDTH = 170;
 	private static final int MIN_HEIGHT = 180;
 	private static final int AVATAR_SIZE = 20;
 	private static final int HEADER_HEIGHT = 24;
 	private static final int INNER_PADDING = 6;
 	private static final int SCREEN_MARGIN = 8;
-	private static final int RESIZE_HANDLE_SIZE = 10;
 	private static final int COMPOSER_HEIGHT = 22;
 	private static final int SEND_BUTTON_WIDTH = 34;
+	private static final int CHAT_BUTTON_WIDTH = 24;
+	private static final int CHAT_BUTTON_HEIGHT = 16;
 	private static final int MIN_COMPOSER_PANEL_WIDTH = 80;
 
 	private final CompanionSettings settings;
 	private final CompanionMessaging messaging;
+	private final LlmSettings llmSettings;
+	private final LlmClient llmClient;
 	private final List<MessageRow> cachedRows = new ArrayList<>();
 	private EditBox messageInput;
+	private CompanionMessaging.ChatType chatType = CompanionMessaging.ChatType.AI;
+	private CompanionMessaging.ChatType cachedChatType = CompanionMessaging.ChatType.AI;
 	private int cachedViewportWidth = -1;
 	private int scrollOffset;
 	private int dragGrabOffset;
-	private int dragPanelOffsetX;
-	private int dragPanelOffsetY;
 	private int lastMessageCount;
+	private int pendingAiReplies;
 	private boolean draggingScrollbar;
-	private boolean draggingPanel;
-	private ResizeCorner resizeCorner;
-	private PanelLayout resizeStartLayout;
-	private int resizeStartMouseX;
-	private int resizeStartMouseY;
 
-	public ConversationPanel(CompanionSettings settings, CompanionMessaging messaging) {
+	public ConversationPanel(
+			CompanionSettings settings,
+			CompanionMessaging messaging,
+			LlmSettings llmSettings,
+			LlmClient llmClient
+	) {
 		this.settings = settings;
 		this.messaging = messaging;
+		this.llmSettings = llmSettings;
+		this.llmClient = llmClient;
 	}
 
 	public void attach(InventoryScreen screen) {
@@ -71,12 +82,6 @@ public final class ConversationPanel {
 		ScreenEvents.remove(screen).register(removed -> {
 			draggingScrollbar = false;
 			setInputFocused(false);
-			if (draggingPanel || resizeCorner != null) {
-				settings.save();
-				draggingPanel = false;
-				resizeCorner = null;
-				resizeStartLayout = null;
-			}
 		});
 	}
 
@@ -105,15 +110,19 @@ public final class ConversationPanel {
 		graphics.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + layout.height(),
 				0xCC141414);
 		graphics.outline(layout.x(), layout.y(), layout.width(), layout.height(), 0xFF555555);
-		int titleWidth = Math.max(1, layout.width() - (layout.width() >= 100 ? 34 : 12));
+		PlayerSkin playerSkin = client.player.getSkin();
+		PlayerSkin companionSkin = settings.skinForRender(client, playerSkin);
+		int chatButtonX = chatButtonX(layout);
+		int titleX = layout.x() + INNER_PADDING + AVATAR_SIZE + 4;
+		int titleWidth = Math.max(1, chatButtonX - titleX - 4);
 		String title = client.font.plainSubstrByWidth(settings.companionDisplayName(), titleWidth);
-		graphics.enableScissor(layout.x() + INNER_PADDING, layout.y(),
-				layout.x() + layout.width() - INNER_PADDING, layout.y() + HEADER_HEIGHT);
-		graphics.text(client.font, title, layout.x() + INNER_PADDING, layout.y() + 7, 0xFFFFFFFF);
+		SkinHeadRenderer.draw(graphics, companionSkin, layout.x() + INNER_PADDING,
+				layout.y() + 2, AVATAR_SIZE);
+		graphics.enableScissor(titleX, layout.y(),
+				chatButtonX - 4, layout.y() + HEADER_HEIGHT);
+		graphics.text(client.font, title, titleX, layout.y() + 7, 0xFFFFFFFF);
 		graphics.disableScissor();
-		if (layout.width() >= 100) {
-			drawMoveHandle(graphics, layout.x() + layout.width() - 25, layout.y() + 5);
-		}
+		drawChatButton(graphics, client.font, chatButtonX, layout.y() + 4);
 		graphics.horizontalLine(layout.x() + 4, layout.x() + layout.width() - 4,
 				layout.y() + HEADER_HEIGHT - 1, 0x88555555);
 
@@ -123,8 +132,6 @@ public final class ConversationPanel {
 		} else {
 			int scrollFromTop = maxScroll - scrollOffset;
 			int rowY = layout.viewportY() - scrollFromTop;
-			PlayerSkin playerSkin = client.player.getSkin();
-			PlayerSkin companionSkin = settings.skinForRender(client, playerSkin);
 			graphics.enableScissor(layout.viewportX(), layout.viewportY(),
 					layout.viewportX() + layout.viewportWidth(), layout.viewportY() + layout.viewportHeight());
 			for (MessageRow row : rows) {
@@ -135,8 +142,11 @@ public final class ConversationPanel {
 			graphics.disableScissor();
 			drawScrollbar(graphics, layout, totalHeight, maxScroll);
 		}
+		if (chatType == CompanionMessaging.ChatType.AI && pendingAiReplies > 0) {
+			graphics.text(client.font, "Thinking...", layout.viewportX() + 4,
+					layout.viewportY() + layout.viewportHeight() - client.font.lineHeight - 2, 0xFFAAAAAA);
+		}
 		drawComposer(graphics, client.font, layout, mouseX, mouseY, delta);
-		drawResizeHandles(graphics, layout);
 	}
 
 	private void drawMessage(
@@ -195,7 +205,10 @@ public final class ConversationPanel {
 		graphics.fill(composer.sendX(), composer.y(), composer.sendX() + SEND_BUTTON_WIDTH,
 				composer.y() + COMPOSER_HEIGHT, hasMessage ? 0xFF315F7F : 0xFF292929);
 		graphics.outline(composer.sendX(), composer.y(), SEND_BUTTON_WIDTH, COMPOSER_HEIGHT, 0xFF555555);
-		graphics.centeredText(font, "Send", composer.sendX() + SEND_BUTTON_WIDTH / 2,
+		String sendLabel = chatType == CompanionMessaging.ChatType.AI && pendingAiReplies > 0
+				? "..."
+				: "Send";
+		graphics.centeredText(font, sendLabel, composer.sendX() + SEND_BUTTON_WIDTH / 2,
 				composer.y() + 7, hasMessage ? 0xFFFFFFFF : 0xFF888888);
 	}
 
@@ -221,30 +234,41 @@ public final class ConversationPanel {
 	}
 
 	private List<MessageRow> messageRows(Font font, PanelLayout layout) {
-		int messageCount = messaging.messageCount();
-		if (cachedViewportWidth != layout.viewportWidth() || messageCount < cachedRows.size()) {
+		int messageCount = messaging.messageCount(chatType);
+		if (cachedViewportWidth != layout.viewportWidth() || cachedChatType != chatType
+				|| messageCount < cachedRows.size()) {
 			cachedRows.clear();
 			cachedViewportWidth = layout.viewportWidth();
+			cachedChatType = chatType;
 		}
 
 		int availableWidth = Math.max(16, layout.viewportWidth() - AVATAR_SIZE - 8);
 		int maxTextWidth = Math.max(8, availableWidth - 8);
 		while (cachedRows.size() < messageCount) {
-			CompanionMessaging.Message message = messaging.messageAt(cachedRows.size());
-			List<FormattedCharSequence> lines = font.split(Component.literal(message.text()), maxTextWidth);
-			if (lines.isEmpty()) {
-				lines = List.of(FormattedCharSequence.EMPTY);
-			}
-			int widestLine = 0;
-			for (FormattedCharSequence line : lines) {
-				widestLine = Math.max(widestLine, font.width(line));
-			}
-			int bubbleWidth = Math.min(availableWidth, Math.max(24, widestLine + 8));
-			int bubbleHeight = lines.size() * font.lineHeight + 8;
-			int rowHeight = Math.max(AVATAR_SIZE, bubbleHeight) + 4;
-			cachedRows.add(new MessageRow(message, List.copyOf(lines), bubbleWidth, bubbleHeight, rowHeight));
+			CompanionMessaging.Message message = messaging.messageAt(chatType, cachedRows.size());
+			cachedRows.add(createMessageRow(font, message, maxTextWidth, availableWidth));
 		}
 		return cachedRows;
+	}
+
+	private MessageRow createMessageRow(
+			Font font,
+			CompanionMessaging.Message message,
+			int maxTextWidth,
+			int availableWidth
+	) {
+		List<FormattedCharSequence> lines = font.split(Component.literal(message.text()), maxTextWidth);
+		if (lines.isEmpty()) {
+			lines = List.of(FormattedCharSequence.EMPTY);
+		}
+		int widestLine = 0;
+		for (FormattedCharSequence line : lines) {
+			widestLine = Math.max(widestLine, font.width(line));
+		}
+		int bubbleWidth = Math.min(availableWidth, Math.max(24, widestLine + 8));
+		int bubbleHeight = lines.size() * font.lineHeight + 8;
+		int rowHeight = Math.max(AVATAR_SIZE, bubbleHeight) + 4;
+		return new MessageRow(message, List.copyOf(lines), bubbleWidth, bubbleHeight, rowHeight);
 	}
 
 	private boolean allowMouseClick(Screen screen, MouseButtonEvent event) {
@@ -266,17 +290,8 @@ public final class ConversationPanel {
 				return false;
 			}
 			setInputFocused(false);
-			resizeCorner = findResizeCorner((int) event.x(), (int) event.y(), layout);
-			if (resizeCorner != null) {
-				resizeStartLayout = layout;
-				resizeStartMouseX = (int) event.x();
-				resizeStartMouseY = (int) event.y();
-				return false;
-			}
-			if (event.y() < layout.y() + HEADER_HEIGHT) {
-				draggingPanel = true;
-				dragPanelOffsetX = (int) event.x() - layout.x();
-				dragPanelOffsetY = (int) event.y() - layout.y();
+			if (containsChatButton(layout, event.x(), event.y())) {
+				toggleChatType();
 				return false;
 			}
 			ScrollGeometry geometry = scrollGeometry(layout);
@@ -332,22 +347,59 @@ public final class ConversationPanel {
 			return;
 		}
 
-		messaging.addPlayerMessage(text);
-		messaging.addMessage(CompanionMessaging.Sender.COMPANION, BasicMathResponder.respond(text));
+		messaging.addPlayerMessage(chatType, text);
+		if (chatType == CompanionMessaging.ChatType.MATH) {
+			messaging.addMessage(chatType, CompanionMessaging.Sender.COMPANION,
+					BasicMathResponder.respond(text));
+		} else {
+			requestAiReply();
+		}
 		messageInput.setValue("");
 		scrollOffset = 0;
 	}
 
+	private void requestAiReply() {
+		if (!llmSettings.isEnabled()) {
+			messaging.addMessage(CompanionMessaging.ChatType.AI, CompanionMessaging.Sender.COMPANION,
+					"AI chat is disabled. Open G > LLM Setup to enable a service.");
+			return;
+		}
+		if (!llmSettings.isConfigured()) {
+			messaging.addMessage(CompanionMessaging.ChatType.AI, CompanionMessaging.Sender.COMPANION,
+					"Set a model and API key in G > LLM Setup first.");
+			return;
+		}
+
+		pendingAiReplies++;
+		List<CompanionMessaging.Message> history = messaging.history(CompanionMessaging.ChatType.AI);
+		int firstMessage = Math.max(0, history.size() - MAX_LLM_HISTORY_MESSAGES);
+		List<CompanionMessaging.Message> recentHistory = history.subList(firstMessage, history.size());
+		llmClient.reply(llmSettings, recentHistory, settings.companionDisplayName())
+				.whenComplete((reply, failure) -> Minecraft.getInstance().execute(() -> {
+					pendingAiReplies = Math.max(0, pendingAiReplies - 1);
+					if (failure != null) {
+						String detail = LlmClient.failureMessage(failure);
+						LOGGER.error("LLM request failed: {}", detail);
+						messaging.addMessage(CompanionMessaging.ChatType.AI, CompanionMessaging.Sender.COMPANION,
+								"I couldn't get an AI reply: " + detail);
+					} else {
+						messaging.addMessage(CompanionMessaging.ChatType.AI,
+								CompanionMessaging.Sender.COMPANION, reply);
+					}
+				}));
+	}
+
+	private void toggleChatType() {
+		chatType = chatType == CompanionMessaging.ChatType.AI
+				? CompanionMessaging.ChatType.MATH
+				: CompanionMessaging.ChatType.AI;
+		cachedRows.clear();
+		cachedViewportWidth = -1;
+		scrollOffset = 0;
+		lastMessageCount = messaging.messageCount(chatType);
+	}
+
 	private boolean allowMouseDrag(Screen screen, MouseButtonEvent event, double deltaX, double deltaY) {
-		if (resizeCorner != null && event.button() == 0) {
-			resizePanel(screen, (int) event.x() - resizeStartMouseX,
-					(int) event.y() - resizeStartMouseY);
-			return false;
-		}
-		if (draggingPanel && event.button() == 0) {
-			movePanel(screen, (int) event.x() - dragPanelOffsetX, (int) event.y() - dragPanelOffsetY);
-			return false;
-		}
 		if (!draggingScrollbar || event.button() != 0) {
 			return true;
 		}
@@ -359,15 +411,9 @@ public final class ConversationPanel {
 	}
 
 	private boolean allowMouseRelease(Screen screen, MouseButtonEvent event) {
-		boolean wasDragging = draggingScrollbar || draggingPanel || resizeCorner != null;
+		boolean wasDragging = draggingScrollbar;
 		if (event.button() == 0) {
-			if (draggingPanel || resizeCorner != null) {
-				settings.save();
-			}
 			draggingScrollbar = false;
-			draggingPanel = false;
-			resizeCorner = null;
-			resizeStartLayout = null;
 		}
 		PanelLayout layout = layout(screen.width, screen.height);
 		return !wasDragging && (layout == null || !contains(layout, event.x(), event.y()));
@@ -415,8 +461,13 @@ public final class ConversationPanel {
 		scrollOffset = (int) Math.round(fromBottom * geometry.maxScroll());
 	}
 
-	private void movePanel(Screen screen, int x, int y) {
-		PanelLayout current = layout(screen.width, screen.height);
+	public PanelBounds previewBounds(int screenWidth, int screenHeight) {
+		PanelLayout panel = layout(screenWidth, screenHeight);
+		return panel == null ? null : new PanelBounds(panel.x(), panel.y(), panel.width(), panel.height());
+	}
+
+	public void setPositionFromTopLeft(int x, int y, int screenWidth, int screenHeight) {
+		PanelLayout current = layout(screenWidth, screenHeight);
 		if (current == null) {
 			return;
 		}
@@ -428,42 +479,110 @@ public final class ConversationPanel {
 		);
 	}
 
-	private void resizePanel(Screen screen, int deltaX, int deltaY) {
-		PanelLayout start = resizeStartLayout;
-		if (start == null || resizeCorner == null) {
-			return;
-		}
-
-		int inventoryLeft = screen.width / 2 - 88;
-		int maximumWidth = resizeCorner.left()
+	public void resizePreviewFromCorner(
+			PanelBounds start,
+			boolean resizeLeft,
+			boolean resizeTop,
+			int deltaX,
+			int deltaY,
+			int screenWidth,
+			int screenHeight
+	) {
+		int inventoryLeft = screenWidth / 2 - 88;
+		int maximumWidth = resizeLeft
 				? start.x() + start.width() - SCREEN_MARGIN
 				: inventoryLeft - SCREEN_MARGIN - start.x();
 		int minimumWidth = Math.min(MIN_WIDTH, Math.max(1, maximumWidth));
-		int widthDelta = resizeCorner.left() ? -deltaX : deltaX;
+		int widthDelta = resizeLeft ? -deltaX : deltaX;
 		int newWidth = clamp(start.width() + widthDelta, minimumWidth, Math.max(minimumWidth, maximumWidth));
-		int newX = resizeCorner.left() ? start.x() + start.width() - newWidth : start.x();
+		int newX = resizeLeft ? start.x() + start.width() - newWidth : start.x();
 
-		int maximumHeight = resizeCorner.top()
+		int maximumHeight = resizeTop
 				? start.y() + start.height() - SCREEN_MARGIN
-				: screen.height - SCREEN_MARGIN - start.y();
+				: screenHeight - SCREEN_MARGIN - start.y();
 		int minimumHeight = Math.min(MIN_HEIGHT, Math.max(1, maximumHeight));
-		int heightDelta = resizeCorner.top() ? -deltaY : deltaY;
+		int heightDelta = resizeTop ? -deltaY : deltaY;
 		int newHeight = clamp(start.height() + heightDelta, minimumHeight,
 				Math.max(minimumHeight, maximumHeight));
-		int newY = resizeCorner.top() ? start.y() + start.height() - newHeight : start.y();
+		int newY = resizeTop ? start.y() + start.height() - newHeight : start.y();
 
 		newX = clamp(newX, SCREEN_MARGIN, Math.max(SCREEN_MARGIN, inventoryLeft - newWidth - SCREEN_MARGIN));
 		newY = clamp(newY, SCREEN_MARGIN,
-				Math.max(SCREEN_MARGIN, screen.height - newHeight - SCREEN_MARGIN));
+				Math.max(SCREEN_MARGIN, screenHeight - newHeight - SCREEN_MARGIN));
 		settings.setConversationSize(newWidth, newHeight);
 
-		PanelLayout resized = layout(screen.width, screen.height);
+		PanelLayout resized = layout(screenWidth, screenHeight);
 		if (resized != null) {
 			settings.setConversationPosition(
 					resized.maxX() == 0 ? 0.0F : (float) (newX - SCREEN_MARGIN) / resized.maxX(),
 					resized.maxY() == 0 ? 0.0F : (float) (newY - SCREEN_MARGIN) / resized.maxY()
 			);
 		}
+	}
+
+	public void renderEditorPreview(
+			GuiGraphicsExtractor graphics,
+			Minecraft client,
+			int screenWidth,
+			int screenHeight
+	) {
+		PanelLayout layout = layout(screenWidth, screenHeight);
+		if (layout == null) {
+			return;
+		}
+
+		graphics.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + layout.height(),
+				0xCC141414);
+		graphics.outline(layout.x(), layout.y(), layout.width(), layout.height(), 0xFFFFFFFF);
+		PlayerSkin baseSkin = client.player == null
+				? DefaultPlayerSkin.getDefaultSkin()
+				: client.player.getSkin();
+		PlayerSkin companionSkin = settings.skinForRender(client, baseSkin);
+		int buttonX = chatButtonX(layout);
+		int titleX = layout.x() + INNER_PADDING + AVATAR_SIZE + 4;
+		String title = client.font.plainSubstrByWidth(settings.companionDisplayName(),
+				Math.max(1, buttonX - titleX - 4));
+		SkinHeadRenderer.draw(graphics, companionSkin, layout.x() + INNER_PADDING,
+				layout.y() + 2, AVATAR_SIZE);
+		graphics.enableScissor(titleX, layout.y(), buttonX - 4, layout.y() + HEADER_HEIGHT);
+		graphics.text(client.font, title, titleX, layout.y() + 7, 0xFFFFFFFF);
+		graphics.disableScissor();
+		drawChatButton(graphics, client.font, buttonX, layout.y() + 4);
+		graphics.horizontalLine(layout.x() + 4, layout.x() + layout.width() - 4,
+				layout.y() + HEADER_HEIGHT - 1, 0x88555555);
+
+		int availableWidth = Math.max(16, layout.viewportWidth() - AVATAR_SIZE - 8);
+		int maxTextWidth = Math.max(8, availableWidth - 8);
+		String example = chatType == CompanionMessaging.ChatType.MATH
+				? "3k + 58k = 61,000"
+				: "Hi! How can I help?";
+		MessageRow companionRow = createMessageRow(client.font,
+				new CompanionMessaging.Message(CompanionMessaging.Sender.COMPANION, example),
+				maxTextWidth, availableWidth);
+		int rowY = layout.viewportY() + 4;
+		drawMessage(graphics, client.font, companionRow, layout, rowY, companionSkin);
+		rowY += companionRow.rowHeight();
+		if (chatType == CompanionMessaging.ChatType.MATH) {
+			MessageRow playerRow = createMessageRow(client.font,
+					new CompanionMessaging.Message(CompanionMessaging.Sender.PLAYER, "3k + 58k"),
+					maxTextWidth, availableWidth);
+			drawMessage(graphics, client.font, playerRow, layout, rowY, baseSkin);
+		}
+
+		ComposerLayout composer = composerLayout(layout);
+		graphics.horizontalLine(layout.x() + 4, layout.x() + layout.width() - 4,
+				composer.y() - 4, 0x88555555);
+		graphics.fill(composer.inputX(), composer.y(), composer.sendX() - 4,
+				composer.y() + COMPOSER_HEIGHT, 0xCC0D0D0D);
+		graphics.outline(composer.inputX(), composer.y(), composer.sendX() - 4 - composer.inputX(),
+				COMPOSER_HEIGHT, 0xFF555555);
+		graphics.text(client.font, "Message...", composer.inputX() + 4, composer.y() + 7, 0xFF888888);
+		graphics.fill(composer.sendX(), composer.y(), composer.sendX() + SEND_BUTTON_WIDTH,
+				composer.y() + COMPOSER_HEIGHT, 0xFF292929);
+		graphics.outline(composer.sendX(), composer.y(), SEND_BUTTON_WIDTH, COMPOSER_HEIGHT, 0xFF555555);
+		graphics.centeredText(client.font, "Send", composer.sendX() + SEND_BUTTON_WIDTH / 2,
+				composer.y() + 7, 0xFF888888);
+		drawResizeHandles(graphics, layout, 0xFFFFFFFF);
 	}
 
 	private int maxScroll(PanelLayout layout) {
@@ -486,31 +605,38 @@ public final class ConversationPanel {
 				thumbY, thumbHeight, maxScroll);
 	}
 
-	private static void drawMoveHandle(GuiGraphicsExtractor graphics, int x, int y) {
-		int color = 0xFFAAAAAA;
-		graphics.fill(x, y, x + 14, y + 14, 0xCC101010);
-		graphics.outline(x, y, 14, 14, 0xFF666666);
-		int centerX = x + 7;
-		int centerY = y + 7;
-		graphics.fill(centerX - 1, centerY - 4, centerX + 1, centerY + 4, color);
-		graphics.fill(centerX - 4, centerY - 1, centerX + 4, centerY + 1, color);
-		graphics.fill(centerX - 1, centerY - 6, centerX + 1, centerY - 3, color);
-		graphics.fill(centerX - 1, centerY + 3, centerX + 1, centerY + 6, color);
-		graphics.fill(centerX - 6, centerY - 1, centerX - 3, centerY + 1, color);
-		graphics.fill(centerX + 3, centerY - 1, centerX + 6, centerY + 1, color);
-		graphics.fill(centerX - 3, centerY - 4, centerX - 1, centerY - 2, color);
-		graphics.fill(centerX + 1, centerY - 4, centerX + 3, centerY - 2, color);
-		graphics.fill(centerX - 3, centerY + 2, centerX - 1, centerY + 4, color);
-		graphics.fill(centerX + 1, centerY + 2, centerX + 3, centerY + 4, color);
-		graphics.fill(centerX - 4, centerY - 3, centerX - 2, centerY - 1, color);
-		graphics.fill(centerX - 4, centerY + 1, centerX - 2, centerY + 3, color);
-		graphics.fill(centerX + 2, centerY - 3, centerX + 4, centerY - 1, color);
-		graphics.fill(centerX + 2, centerY + 1, centerX + 4, centerY + 3, color);
+	private void drawChatButton(GuiGraphicsExtractor graphics, Font font, int x, int y) {
+		graphics.fill(x, y, x + CHAT_BUTTON_WIDTH, y + CHAT_BUTTON_HEIGHT, 0xCC101010);
+		graphics.outline(x, y, CHAT_BUTTON_WIDTH, CHAT_BUTTON_HEIGHT, 0xFF666666);
+		if (chatType == CompanionMessaging.ChatType.AI) {
+			drawCalculatorIcon(graphics, x + 8, y + 2);
+		} else {
+			graphics.centeredText(font, "AI", x + CHAT_BUTTON_WIDTH / 2, y + 4, 0xFFFFFFFF);
+		}
 	}
 
-	private static void drawResizeHandles(GuiGraphicsExtractor graphics, PanelLayout layout) {
+	private static void drawCalculatorIcon(GuiGraphicsExtractor graphics, int x, int y) {
+		graphics.fill(x, y, x + 8, y + 12, 0xFFBBBBBB);
+		graphics.fill(x + 1, y + 1, x + 7, y + 4, 0xFF222222);
+		graphics.fill(x + 2, y + 6, x + 4, y + 8, 0xFF333333);
+		graphics.fill(x + 5, y + 6, x + 7, y + 8, 0xFF333333);
+		graphics.fill(x + 2, y + 9, x + 4, y + 11, 0xFF333333);
+		graphics.fill(x + 5, y + 9, x + 7, y + 11, 0xFF333333);
+	}
+
+	private static int chatButtonX(PanelLayout layout) {
+		return layout.x() + layout.width() - INNER_PADDING - CHAT_BUTTON_WIDTH;
+	}
+
+	private static boolean containsChatButton(PanelLayout layout, double x, double y) {
+		int buttonX = chatButtonX(layout);
+		int buttonY = layout.y() + 4;
+		return x >= buttonX && x < buttonX + CHAT_BUTTON_WIDTH
+				&& y >= buttonY && y < buttonY + CHAT_BUTTON_HEIGHT;
+	}
+
+	private static void drawResizeHandles(GuiGraphicsExtractor graphics, PanelLayout layout, int color) {
 		int size = 6;
-		int color = 0xFFAAAAAA;
 		graphics.fill(layout.x(), layout.y(), layout.x() + size, layout.y() + size, color);
 		graphics.fill(layout.x() + layout.width() - size, layout.y(),
 				layout.x() + layout.width(), layout.y() + size, color);
@@ -518,18 +644,6 @@ public final class ConversationPanel {
 				layout.x() + size, layout.y() + layout.height(), color);
 		graphics.fill(layout.x() + layout.width() - size, layout.y() + layout.height() - size,
 				layout.x() + layout.width(), layout.y() + layout.height(), color);
-	}
-
-	private static ResizeCorner findResizeCorner(int mouseX, int mouseY, PanelLayout layout) {
-		for (ResizeCorner corner : ResizeCorner.values()) {
-			int left = corner.left() ? layout.x() : layout.x() + layout.width() - RESIZE_HANDLE_SIZE;
-			int top = corner.top() ? layout.y() : layout.y() + layout.height() - RESIZE_HANDLE_SIZE;
-			if (mouseX >= left && mouseX <= left + RESIZE_HANDLE_SIZE
-					&& mouseY >= top && mouseY <= top + RESIZE_HANDLE_SIZE) {
-				return corner;
-			}
-		}
-		return null;
 	}
 
 	private static int clamp(int value, int minimum, int maximum) {
@@ -575,6 +689,9 @@ public final class ConversationPanel {
 	) {
 	}
 
+	public record PanelBounds(int x, int y, int width, int height) {
+	}
+
 	private record MessageRow(
 			CompanionMessaging.Message message,
 			List<FormattedCharSequence> lines,
@@ -597,26 +714,4 @@ public final class ConversationPanel {
 	) {
 	}
 
-	private enum ResizeCorner {
-		TOP_LEFT(true, true),
-		TOP_RIGHT(false, true),
-		BOTTOM_LEFT(true, false),
-		BOTTOM_RIGHT(false, false);
-
-		private final boolean left;
-		private final boolean top;
-
-		ResizeCorner(boolean left, boolean top) {
-			this.left = left;
-			this.top = top;
-		}
-
-		private boolean left() {
-			return left;
-		}
-
-		private boolean top() {
-			return top;
-		}
-	}
 }
